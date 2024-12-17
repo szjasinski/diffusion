@@ -15,7 +15,7 @@ class Diffusion:
         self.model = UNet(3, 3)
 
 
-    def create_linear_scheduler(T, start, end):
+    def create_linear_scheduler(self, T, start, end):
         # DDPM paper defaults: T=1000, start=0.0001, end=0.02
         betas = torch.linspace(start, end, T)
         alphas = 1. - betas
@@ -50,7 +50,6 @@ class Diffusion:
             images.append(x_t)
         
         return images
-
 
 
     def q(self, x_0, t, scheduler='linear'):
@@ -106,12 +105,12 @@ class Diffusion:
 
     def get_loss(self, model, x_0, t):
         x_noisy, noise = self.q(x_0, t)
-        noise_pred = model(x_noisy, t)
+        noise_pred = model(x_noisy)  # model(x_noisy, t)
         loss = F.mse_loss(noise, noise_pred)
         return loss
 
 
-    def train(self, dataloader, T=100, lr=0.001, epochs=3, batch_size=1):
+    def train(self, dataloader, T=100, lr=0.001, epochs=10, batch_size=5):
         "Train Unet model"
 
         model = self.model
@@ -123,7 +122,7 @@ class Diffusion:
             for step, batch in enumerate(dataloader):
                 optimizer.zero_grad()
 
-                t = torch.randint(0, T)
+                t = torch.randint(low=0, high=T, size=(batch_size, 1, 1, 1)) # t must be 4D tensor
                 x = batch[0]
                 loss = self.get_loss(model, x, t)
                 loss.backward()
@@ -136,7 +135,7 @@ class Diffusion:
 
     
     @torch.no_grad()
-    def infer(self, T=10):
+    def infer(self, T=100):
         """
         Generate image from noise
         (Algorith 2 in DDPM paper)
@@ -151,7 +150,7 @@ class Diffusion:
 
         # Go from T to 0
         for t in range(0, T)[::-1]:
-            e_t = self.model(x_t, t)  # Predicted noise
+            e_t = self.model(x_t)  # Predicted noise, self.model(x_t, t)
             x_t = self.q_reverse(x_t, t, e_t)
             images.append(x_t)
         

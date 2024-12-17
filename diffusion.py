@@ -1,6 +1,9 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
+from torch.utils.data.dataloader import DataLoader
 
 from diffusion_unet import UNet
 
@@ -15,7 +18,7 @@ class Diffusion:
         self.model = UNet(3, 3)
 
 
-    def create_linear_scheduler(self, T, start, end):
+    def create_linear_scheduler(self, T: int, start: float, end: float) -> dict:
         # DDPM paper defaults: T=1000, start=0.0001, end=0.02
         betas = torch.linspace(start, end, T)
         alphas = 1. - betas
@@ -29,7 +32,7 @@ class Diffusion:
         return linear_scheduler
 
 
-    def q_iteratively(self, x_0, t, scheduler='linear'):
+    def q_iteratively(self, x_0: torch.Tensor, t: int, scheduler: str = 'linear') -> list[torch.Tensor]:
         """
         Samples a new image from q step by step
         May be used to visualize forward process later
@@ -52,13 +55,13 @@ class Diffusion:
         return images
 
 
-    def q(self, x_0, t, scheduler='linear'):
+    def q(self, x_0: torch.Tensor, t: torch.Tensor, scheduler: str = 'linear') -> tuple[torch.Tensor, torch.Tensor]:
         """
         Samples a new image from q in one step
         Used for training the model
         Returns the noised image and the noise applied to an image at timestep t
         x_0: the original image
-        t: timestep
+        t: timesteps tensor (different times for different images)
         scheduler: scheduler 
         """
 
@@ -72,7 +75,7 @@ class Diffusion:
 
 
     @torch.no_grad()
-    def q_reverse(self, x_t, t, e_t, scheduler='linear'):
+    def q_reverse(self, x_t: torch.Tensor, t: int, e_t: torch.Tensor, scheduler: str = 'linear') -> torch.Tensor:
         """
         Samples a new image from reverse q (one iteration of Algorithm 2 in DDPM paper)
         Returns x_(t-1) 
@@ -89,39 +92,36 @@ class Diffusion:
         image_scaling_t = torch.sqrt(1 / a)[t]
         noise_scaling_t = ((1 - a) / torch.sqrt(1 - a_bar))[t]
 
-        # Estimated mean
-        u_t = image_scaling_t * (x_t - noise_scaling_t * e_t)
-
+        u_t = image_scaling_t * (x_t - noise_scaling_t * e_t)   # Estimated mean
+        
         if t == 0:
             return u_t
         else:
             B_t = B[t-1]    # why??
-            z = torch.randn_like(x_t)
             sigma_t = torch.sqrt(B_t)   # setting sigma_t to B_t works, variances may be learned by nn
+            z = torch.randn_like(x_t)
             new_x = u_t + sigma_t * z
-    
             return new_x
 
 
-    def get_loss(self, model, x_0, t):
+    def get_loss(self, model: nn.Module, x_0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         x_noisy, noise = self.q(x_0, t)
         noise_pred = model(x_noisy)  # model(x_noisy, t)
         loss = F.mse_loss(noise, noise_pred)
+        # print(loss.shape)
         return loss
 
 
-    def train(self, dataloader, T=100, lr=0.001, epochs=10, batch_size=5):
+    def train(self, dataloader: DataLoader, T: int, lr: float, epochs: int, batch_size: int) -> None:
         "Train Unet model"
 
         model = self.model
-
         optimizer = optim.Adam(model.parameters(), lr=lr)
 
         model.train()
         for epoch in range(epochs):
             for step, batch in enumerate(dataloader):
                 optimizer.zero_grad()
-
                 t = torch.randint(low=0, high=T, size=(batch_size, 1, 1, 1)) # t must be 4D tensor
                 x = batch[0]
                 loss = self.get_loss(model, x, t)
@@ -135,7 +135,7 @@ class Diffusion:
 
     
     @torch.no_grad()
-    def infer(self, T=100):
+    def infer(self, T: int) -> list[torch.Tensor]:
         """
         Generate image from noise
         (Algorith 2 in DDPM paper)
@@ -145,7 +145,7 @@ class Diffusion:
         self.model.eval()
 
         # Noise to generate images from
-        x_t = torch.randn((1, 3, 64, 64)) # Change image shape
+        x_t = torch.randn((1, 3, 64, 64))
         images = [x_t]
 
         # Go from T to 0

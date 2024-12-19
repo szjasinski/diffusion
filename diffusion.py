@@ -10,148 +10,170 @@ from diffusion_unet import UNet
 
 class Diffusion:
 
-    def __init__(self):
-        self.schedulers = dict()
-        self.schedulers['linear'] = self.create_linear_scheduler(T=1000, start=0.0001, end=0.02)
+    def __init__(self, T: int = 1000, noise_scheduler: str = "linear"):
+        betas_dict = {"linear": self._get_linear_betas,
+                      # Add cosine and others
+                      }
+        if noise_scheduler not in betas_dict:
+            raise ValueError(f"Unsupported noise scheduler: {noise_scheduler}")
+
+        betas = betas_dict[noise_scheduler](T=T)
+
+        self.coeffs = self._create_coeffs_from_betas(betas)
+        self.T = T
 
         self.model_path = "model_checkpoint.pth"
         self.model = UNet(3, 3)
 
 
-    def create_linear_scheduler(self, T: int, start: float, end: float) -> dict:
-        # DDPM paper defaults: T=1000, start=0.0001, end=0.02
-        betas = torch.linspace(start, end, T)
+    def _create_coeffs_from_betas(self, betas: torch.Tensor) -> dict[str, torch.Tensor]:
+        coeffs = dict()
         alphas = 1. - betas
         alphas_bar = torch.cumprod(alphas, dim=0)
 
-        linear_scheduler = dict()
-        linear_scheduler["betas"] = betas
-        linear_scheduler["alphas"] = alphas
-        linear_scheduler["alphas_bar"] = alphas_bar
+        # for forward process q(x_t | x_t-1)
+        coeffs["sqrt_one_minus_b"] = torch.sqrt(1 - betas)
+        coeffs["sqrt_b"] = torch.sqrt(betas) # also for reverse process (substituted as sigmas)
+        
+        # for forward process q(x_t | x_0)
+        coeffs["sqrt_a_bar"] = torch.sqrt(alphas_bar)
+        coeffs["sqrt_one_minus_a_bar"] = torch.sqrt(1 - alphas_bar)
 
-        return linear_scheduler
+        # for reverse process p_theta(x_t-1 | x_t)
+        coeffs["image_coeff"] = torch.sqrt(1 / alphas)
+        coeffs["noise_coeff"] = ((1 - alphas) / torch.sqrt(1 - alphas_bar))
+
+        return coeffs
+    
+
+    def _get_linear_betas(self, T: int, start: float = 0.0001, end: float = 0.02) -> torch.Tensor:
+        # DDPM paper defaults: T=1000, start=0.0001, end=0.02
+        betas = torch.linspace(start, end, T)
+        return betas
 
 
-    def q_iteratively(self, x_0: torch.Tensor, t: int, scheduler: str = 'linear') -> list[torch.Tensor]:
+    def get_forward_process_list(self, x_0: torch.Tensor) -> list[torch.Tensor]:
         """
         Samples a new image from q step by step
-        May be used to visualize forward process later
-        Returns the noised images
-        x_0: the original image
-        t: timestep (t equal to scheduler length will perform complete forward diffusion)
-        scheduler: scheduler 
+        Prepares list for visualization of forward process
+        Returns the list with images from complete forward diffusion process
+        x_0: original image, shape: (batch_size, C, H, W)
         """
 
-        B = self.schedulers[scheduler]['betas']
         x_t = x_0
         images = [x_t]
+        c = self.coeffs
 
-        # sample step by step 
-        for i in range(t):
+        for t in range(self.T):
             noise = torch.randn_like(x_t)
-            x_t = torch.sqrt(1 - B[i]) * x_t + torch.sqrt(B[i]) * noise  # sample from q(x_t|x_t-1)
+            x_t = c['sqrt_one_minus_b'][t] * x_t + c['sqrt_b'][t] * noise   # sample from q(x_t|x_t-1)
             images.append(x_t)
         
         return images
 
 
-    def q(self, x_0: torch.Tensor, t: torch.Tensor, scheduler: str = 'linear') -> tuple[torch.Tensor, torch.Tensor]:
+    def sample_forward_process(self, x_0: torch.Tensor, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Samples a new image from q in one step
+        Samples a new image from q in one step at timestep t
         Used for training the model
-        Returns the noised image and the noise applied to an image at timestep t
-        x_0: the original image
-        t: timesteps tensor (different times for different images)
-        scheduler: scheduler 
-        """
+        Returns noisy image and the applied noise at timestep t
 
-        a_bar = self.schedulers[scheduler]["alphas_bar"]
+        x_0: original image, shape: (batch_size, C, H, W)
+        t: timestep, shape: (batch_size, 1, 1, 1)
+        """
+        assert 0 <= t.min() and t.max() <= self.T
+        assert x_0.shape[0] == t.shape[0]
+        assert (t.shape[1], t.shape[2], t.shape[3]) == (1, 1, 1)
+
+        c = self.coeffs
         noise = torch.randn_like(x_0)
 
-        # sample in one step
-        x_t = torch.sqrt(a_bar)[t] * x_0 + torch.sqrt(1 - a_bar)[t] * noise # sample from q(x_t | x_0)
+        x_t = c["sqrt_a_bar"][t] * x_0 + c["sqrt_one_minus_a_bar"][t] * noise   # sample from q(x_t | x_0)
 
         return x_t, noise
 
 
     @torch.no_grad()
-    def q_reverse(self, x_t: torch.Tensor, t: int, e_t: torch.Tensor, scheduler: str = 'linear') -> torch.Tensor:
+    def sample_reverse_process(self, x_t: torch.Tensor, t: int, e_t: torch.Tensor) -> torch.Tensor:
         """
-        Samples a new image from reverse q (one iteration of Algorithm 2 in DDPM paper)
-        Returns x_(t-1) 
-        x_t: noised image
+        Samples a new image from p_theta (one iteration of Algorithm 2 in DDPM paper)
+        Used for inference
+        Returns slightly denoised image - x_(t-1) 
+
+        x_t: noisy image, shape: (batch_size, C, H, W)
         t: timestep
-        e_t: predicted noise
-        scheduler: scheduler
+        e_t: predicted noise, shape: (batch_size, C, H, W)
         """
+        assert 0 <= t <= self.T
+        assert x_t.shape == e_t.shape
 
-        B = self.schedulers[scheduler]['betas']
-        a = self.schedulers[scheduler]['alphas']
-        a_bar = self.schedulers[scheduler]['alphas_bar']
-
-        image_scaling_t = torch.sqrt(1 / a)[t]
-        noise_scaling_t = ((1 - a) / torch.sqrt(1 - a_bar))[t]
-
-        u_t = image_scaling_t * (x_t - noise_scaling_t * e_t)   # Estimated mean
+        c = self.coeffs
         
-        if t == 0:
-            return u_t
-        else:
-            B_t = B[t-1]    # why??
-            sigma_t = torch.sqrt(B_t)   # setting sigma_t to B_t works, variances may be learned by nn
-            z = torch.randn_like(x_t)
-            new_x = u_t + sigma_t * z
+        u_t = c['image_coeff'][t] * (x_t - c['noise_coeff'][t] * e_t)
+
+        sigma_t = c['sqrt_b'][t-1]   # setting sigma_t**2 to B_t works, variances may be learned by nn. Why t-1??
+        z = torch.randn_like(x_t)
+        new_x = u_t + sigma_t * z   # sample from p_theta(x_t-1 | x_t)
+        
+        if t > 0:
             return new_x
+        else:
+            return u_t
 
 
-    def get_loss(self, model: nn.Module, x_0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        x_noisy, noise = self.q(x_0, t)
-        noise_pred = model(x_noisy)  # model(x_noisy, t)
+    def get_loss(self, x_0: torch.Tensor) -> torch.Tensor:
+        """
+        Draw random timesteps for batch of images, perform forward process, predict noise, get MSE
+        """
+        batch_size = x_0.shape[0]
+        t = torch.randint(low=0, high=self.T, size=(batch_size,)).view(batch_size, 1, 1, 1)
+
+        x_noisy, noise = self.sample_forward_process(x_0, t)
+        noise_pred = self.model(x_noisy)  # model(x_noisy, t)
         loss = F.mse_loss(noise, noise_pred)
-        # print(loss.shape)
+
         return loss
 
 
-    def train(self, dataloader: DataLoader, T: int, lr: float, epochs: int, batch_size: int) -> None:
+    def train(self, dataloader: DataLoader, lr: float, epochs: int) -> None:
         "Train Unet model"
 
-        model = self.model
-        optimizer = optim.Adam(model.parameters(), lr=lr)
-
-        model.train()
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        self.model.train()
+        min_loss = 10**15
         for epoch in range(epochs):
-            for step, batch in enumerate(dataloader):
+            epoch_loss = 0
+            for (x, _) in dataloader:
                 optimizer.zero_grad()
-                t = torch.randint(low=0, high=T, size=(batch_size, 1, 1, 1)) # t must be 4D tensor
-                x = batch[0]
-                loss = self.get_loss(model, x, t)
+                loss = self.get_loss(x)
                 loss.backward()
                 optimizer.step()
-
-                if epoch % 1 == 0 and step % 100 == 0:
-                    print(f"Epoch {epoch} | Step {step:03d} | Loss: {loss.item()} ")
-                
-            torch.save(model.state_dict(), self.model_path)
+                epoch_loss += loss.item()
+            
+            avg_loss = epoch_loss / len(dataloader)
+            print(f"Epoch {epoch} | Avg loss: {avg_loss} ")
+            if avg_loss < min_loss:
+                min_loss = avg_loss
+                torch.save(self.model.state_dict(), self.model_path)
+                print("New min loss. Model saved.")
 
     
     @torch.no_grad()
-    def infer(self, T: int) -> list[torch.Tensor]:
+    def infer(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32)) -> list[torch.Tensor]:
         """
         Generate image from noise
-        (Algorith 2 in DDPM paper)
+        (Algorithm 2 in DDPM paper)
         """
 
         self.model.load_state_dict(torch.load(self.model_path))
         self.model.eval()
 
-        # Noise to generate images from
-        x_t = torch.randn((1, 3, 64, 64))
+        x_t = torch.randn((batch_size, image_shape[0], image_shape[1], image_shape[2]))
         images = [x_t]
 
-        # Go from T to 0
         for t in range(0, T)[::-1]:
             e_t = self.model(x_t)  # Predicted noise, self.model(x_t, t)
-            x_t = self.q_reverse(x_t, t, e_t)
+            x_t = self.sample_reverse_process(x_t, t, e_t)
             images.append(x_t)
         
         return images

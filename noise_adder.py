@@ -1,6 +1,5 @@
 import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt
 
 class Scheduler:
     def __init__(self, num_noise_steps, **kwargs):

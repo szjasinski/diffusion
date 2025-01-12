@@ -79,11 +79,12 @@ class Diffusion:
         Returns noisy image and the applied noise at timestep t
 
         x_0: original image, shape: (batch_size, C, H, W)
-        t: timestep, shape: (batch_size, 1, 1, 1)
+        t: timestep, shape: (batch_size, )
         """
-        assert 0 <= t.min() and t.max() <= self.T
+        assert 0 <= t.min() and t.max() < self.T
         assert x_0.shape[0] == t.shape[0]
-        assert (t.shape[1], t.shape[2], t.shape[3]) == (1, 1, 1)
+        
+        t = t.view(t.shape[0], 1, 1, 1)
 
         c = self.coeffs
         noise = torch.randn_like(x_0)
@@ -126,7 +127,7 @@ class Diffusion:
         Draw random timesteps for batch of images, perform forward process, predict noise, get MSE
         """
         batch_size = x_0.shape[0]
-        t = torch.randint(low=0, high=self.T, size=(batch_size,)).view(batch_size, 1, 1, 1)
+        t = torch.randint(low=0, high=self.T, size=(batch_size,))
 
         x_noisy, noise = self.sample_forward_process(x_0, t)
         noise_pred = self.model(x_noisy)  # model(x_noisy, t)

@@ -5,6 +5,9 @@ from torch.utils.data import DataLoader, Subset
 
 import matplotlib.pyplot as plt
 
+import os
+from datetime import datetime
+
 from typing import Tuple, Sequence
 
 
@@ -48,7 +51,10 @@ def load_transformed_CIFAR10_subset(batch_size: int,
     return subset, dataloader
 
 
-def visualize_images(images: Sequence[torch.Tensor], n_rows: int, n_cols: int) -> None:
+def visualize_images(images: Sequence[torch.Tensor], 
+                     n_rows: int, 
+                     n_cols: int,
+                     save_result: bool = False) -> None:
     """
     Visualizes images at different levels of noise in a grid.
 
@@ -56,6 +62,7 @@ def visualize_images(images: Sequence[torch.Tensor], n_rows: int, n_cols: int) -
         images (Sequence[torch.Tensor]): A sequence where each element is a batch of noised images (Tensor of shape [batch_size, C, H, W]).
         n_rows (int): Number of rows in the grid (batch size).
         n_cols (int): Number of columns in the grid (number of noise levels visualized).
+        save_result (bool): Whether to save the resulting grid
     """
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, n_rows * 2))
@@ -74,6 +81,13 @@ def visualize_images(images: Sequence[torch.Tensor], n_rows: int, n_cols: int) -
             axes[row][col].axis("off")
 
     plt.tight_layout()
+
+    if save_result:
+        save_dir = "visualizations"
+        os.makedirs(save_dir, exist_ok=True)
+        filename = f"{save_dir}/{datetime.now()}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Image saved: {filename}")
+
     plt.show()
 
-    return None

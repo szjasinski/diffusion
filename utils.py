@@ -1,49 +1,59 @@
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data import DataLoader, Subset
 
 import matplotlib.pyplot as plt
 
-
-def load_CIFAR10_automobiles(data_transform, max_samples=100, train=True):
-    dataset = torchvision.datasets.CIFAR10(
-        "./data/",
-        download=True,
-        train=train,
-        transform=data_transform,
-    )
-
-    automobiles_indices = [idx for idx, label in enumerate(dataset.targets) if label == 1]
-    selected_indices = automobiles_indices[:max_samples]
-    subset = Subset(dataset, selected_indices)
-
-    return subset
+from typing import Tuple, Sequence
 
 
-def load_transformed_CIFAR10_automobiles(batch_size, max_samples=100, img_size=32):
-    data_transforms = [
+def load_transformed_CIFAR10_subset(batch_size: int, 
+                                    img_size: int = 32,
+                                    train: bool = True,
+                                    label: int = 1,
+                                    path: str  = "./data/") -> Tuple[Subset, DataLoader]:
+    
+    """
+    Loads a subset of the CIFAR-10 dataset containing only images of a specific class label, 
+    applies transformations, and returns both a dataset subset and a DataLoader.
+
+    Args:
+        batch_size (int): The number of samples per batch in the DataLoader.
+        img_size (int, optional): The target size to resize images to (height, width). Defaults to 32.
+        train (bool, optional): Whether to load the training set (True) or test set (False). Defaults to True.
+        label (int, optional): The class label to filter (e.g., 1 for automobiles). Defaults to 1.
+        path (str, optional): The root directory for downloading/storing the dataset. Defaults to "./data/".
+
+    Returns:
+        Tuple[Subset, DataLoader]: 
+            - A `Subset` of CIFAR-10 containing only images of the specified class label.
+            - A `DataLoader` for iterating over the subset.
+    """
+    
+    transformation_list = [
         transforms.Resize((img_size, img_size)),  # Resize to specified img_size
         transforms.ToTensor(),  # Convert to tensor and scale to [0, 1]
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # Normalize for CIFAR-10
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # Normalize to [-1, 1]
     ]
 
-    data_transform = transforms.Compose(data_transforms)
-    train_set = load_CIFAR10_automobiles(data_transform, max_samples=max_samples, train=True)
-    test_set = load_CIFAR10_automobiles(data_transform, train=False)
-    data = ConcatDataset([train_set, test_set])
-    dataloader = DataLoader(data, batch_size=batch_size, shuffle=True, drop_last=True)
+    data_transform = transforms.Compose(transformation_list)
+    dataset = torchvision.datasets.CIFAR10(path, download=True, train=train, transform=data_transform)
 
-    return data, dataloader
+    subset_indices = [idx for idx, lbl in enumerate(dataset.targets) if lbl == label]
+    subset = Subset(dataset, subset_indices)
+
+    dataloader = DataLoader(subset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    return subset, dataloader
 
 
-def visualize_images(images: list[torch.Tensor], n_rows: int, n_cols: int) -> None:
+def visualize_images(images: Sequence[torch.Tensor], n_rows: int, n_cols: int) -> None:
     """
     Visualizes images at different levels of noise in a grid.
 
     Args:
-        images (list): A list where each element is a batch of noised images.
+        images (Sequence[torch.Tensor]): A sequence where each element is a batch of noised images (Tensor of shape [batch_size, C, H, W]).
         n_rows (int): Number of rows in the grid (batch size).
         n_cols (int): Number of columns in the grid (number of noise levels visualized).
     """

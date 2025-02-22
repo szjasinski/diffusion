@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data.dataloader import DataLoader
 
 from diffusion_unet import UNet
@@ -23,7 +23,9 @@ class Diffusion:
         self.T = T
 
         self.model_path = "model_checkpoint.pth"
-        self.model = UNet(3, 3)
+        self.model = UNet(T, 3, 3)
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
     def _create_coeffs_from_betas(self, betas: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -110,53 +112,81 @@ class Diffusion:
 
         c = self.coeffs
         
-        u_t = c['image_coeff'][t] * (x_t - c['noise_coeff'][t] * e_t)
-
-        sigma_t = c['sqrt_b'][t-1]   # setting sigma_t**2 to B_t works, variances may be learned by nn. Why t-1??
-        z = torch.randn_like(x_t)
-        new_x = u_t + sigma_t * z   # sample from p_theta(x_t-1 | x_t)
-        
         if t > 0:
-            return new_x
+            sigma_t = c['sqrt_b'][t]   # setting sigma_t**2 to B_t works, variances may be learned by nn.
         else:
-            return u_t
+            sigma_t = 0
+        
+        u_t = c['image_coeff'][t] * (x_t - c['noise_coeff'][t] * e_t)
+        new_x = u_t + sigma_t * torch.randn_like(x_t)   # sample from p_theta(x_t-1 | x_t)
+
+        return new_x
 
 
-    def get_loss(self, x_0: torch.Tensor) -> torch.Tensor:
+    def get_loss(self, x_0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        Draw random timesteps for batch of images, perform forward process, predict noise, get MSE
+        Perform forward process, predict noise, get MSE
         """
-        batch_size = x_0.shape[0]
-        t = torch.randint(low=0, high=self.T, size=(batch_size,))
 
         x_noisy, noise = self.sample_forward_process(x_0, t)
-        noise_pred = self.model(x_noisy)  # model(x_noisy, t)
+        noise_pred = self.model(x_noisy, t)
         loss = F.mse_loss(noise, noise_pred)
 
         return loss
 
 
-    def train(self, dataloader: DataLoader, lr: float, epochs: int) -> None:
-        "Train Unet model"
+    def train(self, dataloader: DataLoader, lr: float, epochs: int, patience: int = 10, lr_patience: int = 5, factor: float = 0.5) -> None:
+        """
+        Train UNet model.
+
+        Args:
+            dataloader: PyTorch DataLoader providing training data.
+            lr: Learning rate.
+            epochs: Maximum number of epochs.
+            patience: Number of epochs to wait for loss improvement before stopping.
+            lr_patience: Number of epochs without improvement before reducing LR.
+            factor: Factor to multiply LR when loss plateaus (e.g., 0.5 reduces LR by half).
+        """
+
+        self.model.train()
 
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
-        self.model.train()
-        min_loss = 10**15
+        lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=factor, patience=lr_patience)
+
+        best_loss = float('inf')
+        no_improve_count = 0
+
         for epoch in range(epochs):
             epoch_loss = 0
             for (x, _) in dataloader:
                 optimizer.zero_grad()
-                loss = self.get_loss(x)
+                t = torch.randint(low=0, high=self.T, size=(x.shape[0],))
+                loss = self.get_loss(x, t)
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
             
             avg_loss = epoch_loss / len(dataloader)
-            print(f"Epoch {epoch} | Avg loss: {avg_loss} ")
-            if avg_loss < min_loss:
-                min_loss = avg_loss
+            current_lr = optimizer.param_groups[0]['lr']
+
+            print(f"Epoch {epoch} | Avg loss: {avg_loss} | LR: {current_lr} ")
+
+            # Adjust learning rate
+            lr_scheduler.step(avg_loss)
+            
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                no_improve_count = 0
                 torch.save(self.model.state_dict(), self.model_path)
                 print("New min loss. Model saved.")
+            else:
+                no_improve_count += 1
+            
+            # Early stopping check
+            if no_improve_count >= patience:
+                print(f"Early stopping after {epoch+1}. No improvement for {patience} epochs.")
+                break
+
 
     
     @torch.no_grad()
@@ -173,7 +203,8 @@ class Diffusion:
         images = [x_t]
 
         for t in range(0, T)[::-1]:
-            e_t = self.model(x_t)  # Predicted noise, self.model(x_t, t)
+            t = torch.full((1,), t, device=self.device)
+            e_t = self.model(x_t, t)  # Predicted noise
             x_t = self.sample_reverse_process(x_t, t, e_t)
             images.append(x_t)
         

@@ -3,112 +3,115 @@ from PIL import Image
 
 
 class Scheduler:
-    def __init__(self, num_noise_steps, **kwargs):
-        self.num_noise_steps = num_noise_steps
+    def __init__(self, T, **kwargs):
+        self.T = T
         self.params = kwargs
-        self.coeffs = self._compute_coeffs()
+        self._compute_coeffs()
 
-    def schedule_value_at(self, step):
+    def get_beta(self, t):
         raise NotImplementedError
 
     def _compute_coeffs(self):
-        betas = torch.tensor([self.schedule_value_at(step) for step in range(self.num_noise_steps)], dtype=torch.float32)
-        alphas = 1.0 - betas
-        alphas_bar = torch.cumprod(alphas, dim=0)
+        self.betas = torch.tensor([self.get_beta(t) for t in range(self.T)], dtype=torch.float32)
+        self.alphas = 1.0 - self.betas
+        self.alphas_bar = torch.cumprod(self.alphas, dim=0)
 
-        coeffs = {
-            "betas": betas,
-            "alphas": alphas,
-            "alphas_bar": alphas_bar,
-            "sqrt_alphas_bar": torch.sqrt(alphas_bar),
-            "sqrt_one_minus_alphas_bar": torch.sqrt(1 - alphas_bar),
-            "sqrt_betas": torch.sqrt(betas),
-        }
-        return coeffs
+        self.sqrt_alphas_bar = torch.sqrt(self.alphas_bar)
+        self.sqrt_one_minus_alphas_bar = torch.sqrt(1 - self.alphas_bar)
+        self.sqrt_betas = torch.sqrt(self.betas)
+        self.image_coeff = torch.sqrt(1 / self.alphas)
+        self.noise_coeff = (1 - self.alphas) / self.sqrt_one_minus_alphas_bar
 
     def add_noise(self, image: torch.Tensor):
         """Applies noise to an image tensor over the full diffusion process."""
-        c = self.coeffs
-        noisy_images = []
-        for step in range(self.num_noise_steps):
-            noise = torch.randn_like(image)
-            noisy_image = c["sqrt_alphas_bar"][step] * image + c["sqrt_one_minus_alphas_bar"][step] * noise
+        noisy_images = [image]  
+
+        for t in range(self.T):
+            noise = torch.randn_like(noisy_images[-1])
+            noisy_image = self.sqrt_alphas_bar[t] * noisy_images[-1] + self.sqrt_one_minus_alphas_bar[t] * noise
             noisy_images.append(torch.clamp(noisy_image, 0, 1))
+    
         return noisy_images
 
-    def get_noisy_image_at_step(self, image: torch.Tensor, step: int):
+    def get_noisy_image_at_t(self, image: torch.Tensor, t: int):
         """Applies noise to an image tensor at a specific diffusion step."""
-        c = self.coeffs
         noise = torch.randn_like(image)
-        noisy_image = c["sqrt_alphas_bar"][step] * image + c["sqrt_one_minus_alphas_bar"][step] * noise
-        return torch.clamp(noisy_image, 0, 1), noise, c["alphas_bar"][step]
+        noisy_image = self.sqrt_alphas_bar[t] * image + self.sqrt_one_minus_alphas_bar[t] * noise
+        return torch.clamp(noisy_image, 0, 1), noise, self.alphas_bar[t]
+
 
 class CosineScheduler(Scheduler):
-    def __init__(self, num_noise_steps, **kwargs):
-        self.num_noise_steps = num_noise_steps
-        self.smoothing_factor = kwargs.get('smoothing_factor', 0.008) 
+    def __init__(self, T, **kwargs):
+        """
+        Implements a cosine noise schedule with optional smoothing.
 
-        cos_values = torch.tensor([
-            self._cosine_decay_function(torch.tensor(t, dtype=torch.float32), self.smoothing_factor)
-            for t in range(self.num_noise_steps + 1)
-        ], dtype=torch.float32)
+        Args:
+            T (int): Total number of diffusion steps.
+            s (float, optional): Smoothing factor to avoid small alphas at the start. Default is 0.008.
+        """
+        self.T = T
+        self.s = kwargs.get('s', 0.008)  # Smoothing factor
 
-        alphas_bar = cos_values / cos_values[0]  
-        betas = 1 - (alphas_bar[1:] / alphas_bar[:-1])  
-        alphas = 1 - betas 
+        cos_values = torch.tensor(
+            [self._cosine_decay_function(t) for t in range(self.T + 1)],
+            dtype=torch.float32
+        )
 
-        self.alphas_bar = alphas_bar[1:]  
-        self.betas = betas
-        self.alphas = alphas
-        super().__init__(num_noise_steps, **kwargs)
+        alphas_bar = cos_values / cos_values[0]
+        self.betas = 1 - (alphas_bar[1:] / alphas_bar[:-1])
+        self.alphas = 1 - self.betas
+        self.alphas_bar = alphas_bar[1:]
 
-    def schedule_value_at(self, step):
-        return self.betas[step]  
+        super().__init__(T, **kwargs)
 
-    def _cosine_decay_function(self, step, smoothing_factor):
-        return torch.cos(
-            (((step / self.num_noise_steps) + smoothing_factor) / (1 + smoothing_factor)) * torch.pi / 2
-        ) ** 2
+    def get_beta(self, t):
+        return self.betas[t]  
+
+    def _cosine_decay_function(self, t):
+        """Computes alpha_bar using a cosine decay schedule with smoothing factor `s`."""
+        t = torch.tensor(t, dtype=torch.float32)  
+        return torch.cos(((t / self.T + self.s) / (1 + self.s)) * torch.pi / 2) ** 2
+
 
 
 class LinearScheduler(Scheduler):
-    def __init__(self, num_noise_steps, start=0.0001, end=0.02, **kwargs):
-        self.betas = torch.linspace(start, end, num_noise_steps, dtype=torch.float32) 
-        super().__init__(num_noise_steps, **kwargs)
+    def __init__(self, T, start=0.0001, end=0.02, **kwargs):
+        self.betas = torch.linspace(start, end, T, dtype=torch.float32) 
+        super().__init__(T, **kwargs)
 
-    def schedule_value_at(self, step):
-        return self.betas[step]
+    def get_beta(self, t):
+        return self.betas[t]
 
 
 class PolynomialScheduler(Scheduler):
-    def schedule_value_at(self, step):
+    def get_beta(self, t):
         power = self.params.get('power', 2)
-        step_t = torch.tensor(step, dtype=torch.float32)
-        return 1 - (step_t / self.num_noise_steps) ** power
+        t = torch.tensor(t, dtype=torch.float32)
+        return 1 - (t / self.T) ** power
     
 class ExponentialScheduler(Scheduler):
-    def schedule_value_at(self, step):
+    def get_beta(self, t):
         scale = self.params.get('scale', 10)
-        step_t = torch.tensor(step, dtype=torch.float32)
-        return 1 - torch.exp(-scale * (step_t / self.num_noise_steps))
+        t = torch.tensor(t, dtype=torch.float32)
+        return 1 - torch.exp(-scale * (t / self.T))
 
 class InverseScheduler(Scheduler):
-    def schedule_value_at(self, step):
+    def get_beta(self, t):
         scale = self.params.get('scale', 10)
-        step_t = torch.tensor(step, dtype=torch.float32)
-        return 1 - (1 / (1 + scale * (step_t / self.num_noise_steps)))
+        t = torch.tensor(t, dtype=torch.float32)
+        return 1 - (1 / (1 + scale * (t / self.T)))
 
 class LogarithmicScheduler(Scheduler):
-    def schedule_value_at(self, step):
+    def get_beta(self, t):
         smoothing_factor = self.params.get('smoothing_factor', 0.01)
-        step_t = torch.tensor(step, dtype=torch.float32)
-        num_steps_t = torch.tensor(self.num_noise_steps, dtype=torch.float32)
-        return 1 - (torch.log(1 + smoothing_factor * step_t) / torch.log(1 + smoothing_factor * num_steps_t))
+        t = torch.tensor(t, dtype=torch.float32)
+        T_t = torch.tensor(self.T, dtype=torch.float32)
+        return 1 - (torch.log(1 + smoothing_factor * t) / torch.log(1 + smoothing_factor * T_t))
 
 
 class SigmoidScheduler(Scheduler):
-    def schedule_value_at(self, step):
+    def get_beta(self, t):
         k = self.params.get('k', 10)  
-        b = self.params.get('b', self.num_noise_steps / 2) 
-        step_t = torch.tensor(step, dtype=torch.float32)
-        return 1 - (1 / (1 + torch.exp(-k * ((step_t / self.num_noise_steps) - (b / self.num_noise_steps)))))
+        b = self.params.get('b', self.T / 2) 
+        t = torch.tensor(t, dtype=torch.float32)
+        return 1 - (1 / (1 + torch.exp(-k * ((t / self.T) - (b / self.T)))))

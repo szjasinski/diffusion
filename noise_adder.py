@@ -28,16 +28,21 @@ class Scheduler:
 
         for t in range(self.T):
             noise = torch.randn_like(noisy_images[-1])
-            noisy_image = self.sqrt_alphas_bar[t] * noisy_images[-1] + self.sqrt_one_minus_alphas_bar[t] * noise
+            noisy_image = torch.sqrt(1 - self.betas[t]) * noisy_images[-1] + torch.sqrt(self.betas[t]) * noise
             noisy_images.append(torch.clamp(noisy_image, 0, 1))
     
         return noisy_images
 
-    def get_noisy_image_at_t(self, image: torch.Tensor, t: int):
-        """Applies noise to an image tensor at a specific diffusion step."""
+    def get_noisy_image_at_t(self, image: torch.Tensor, t: torch.Tensor):
+        """Applies noise to a batch of images at specific diffusion steps."""
         noise = torch.randn_like(image)
-        noisy_image = self.sqrt_alphas_bar[t] * image + self.sqrt_one_minus_alphas_bar[t] * noise
+        
+        sqrt_1m_betas = torch.sqrt(1 - self.betas[t]).view(-1, 1, 1, 1)
+        sqrt_betas = torch.sqrt(self.betas[t]).view(-1, 1, 1, 1)
+
+        noisy_image = sqrt_1m_betas * image + sqrt_betas * noise
         return torch.clamp(noisy_image, 0, 1), noise, self.alphas_bar[t]
+
 
 
 class CosineScheduler(Scheduler):
@@ -52,10 +57,10 @@ class CosineScheduler(Scheduler):
         self.T = T
         self.s = kwargs.get('s', 0.008)  # Smoothing factor
 
-        cos_values = torch.tensor(
-            [self._cosine_decay_function(t) for t in range(self.T + 1)],
-            dtype=torch.float32
-        )
+        cos_values = torch.tensor([
+            self._cosine_decay_function(torch.tensor(t, dtype=torch.float32))
+            for t in range(self.T + 1)
+        ], dtype=torch.float32)
 
         alphas_bar = cos_values / cos_values[0]
         self.betas = 1 - (alphas_bar[1:] / alphas_bar[:-1])
@@ -69,7 +74,6 @@ class CosineScheduler(Scheduler):
 
     def _cosine_decay_function(self, t):
         """Computes alpha_bar using a cosine decay schedule with smoothing factor `s`."""
-        t = torch.tensor(t, dtype=torch.float32)  
         return torch.cos(((t / self.T + self.s) / (1 + self.s)) * torch.pi / 2) ** 2
 
 
@@ -103,10 +107,10 @@ class InverseScheduler(Scheduler):
 
 class LogarithmicScheduler(Scheduler):
     def get_beta(self, t):
-        smoothing_factor = self.params.get('smoothing_factor', 0.01)
+        s = self.params.get('s', 0.01)  # Smoothing factor
         t = torch.tensor(t, dtype=torch.float32)
         T_t = torch.tensor(self.T, dtype=torch.float32)
-        return 1 - (torch.log(1 + smoothing_factor * t) / torch.log(1 + smoothing_factor * T_t))
+        return 1 - (torch.log(1 + s * t) / torch.log(1 + s * T_t))
 
 
 class SigmoidScheduler(Scheduler):

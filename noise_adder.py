@@ -29,7 +29,7 @@ class Scheduler:
         for t in range(self.T):
             noise = torch.randn_like(noisy_images[-1])
             noisy_image = torch.sqrt(1 - self.betas[t]) * noisy_images[-1] + torch.sqrt(self.betas[t]) * noise
-            noisy_images.append(torch.clamp(noisy_image, 0, 1))
+            noisy_images.append(noisy_image)
     
         return noisy_images
 
@@ -41,7 +41,7 @@ class Scheduler:
         sqrt_betas = torch.sqrt(self.betas[t]).view(-1, 1, 1, 1)
 
         noisy_image = sqrt_1m_betas * image + sqrt_betas * noise
-        return torch.clamp(noisy_image, 0, 1), noise, self.alphas_bar[t]
+        return noisy_image, noise, self.alphas_bar[t]
 
 
 

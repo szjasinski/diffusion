@@ -5,12 +5,15 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data.dataloader import DataLoader
 
-from diffusion_unet import UNet
+# from diffusion_unet import UNet
+from diffusers import UNet2DModel
 
 
 class Diffusion:
 
     def __init__(self, T: int = 1000, noise_scheduler: str = "linear"):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         betas_dict = {"linear": self._get_linear_betas,
                       # Add cosine and others
                       }
@@ -23,9 +26,8 @@ class Diffusion:
         self.T = T
 
         self.model_path = "model_checkpoint.pth"
-        self.model = UNet(T, 3, 3)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = UNet2DModel().to(self.device)
 
 
     def _create_coeffs_from_betas(self, betas: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -50,7 +52,7 @@ class Diffusion:
 
     def _get_linear_betas(self, T: int, start: float = 0.0001, end: float = 0.02) -> torch.Tensor:
         # DDPM paper defaults: T=1000, start=0.0001, end=0.02
-        betas = torch.linspace(start, end, T)
+        betas = torch.linspace(start, end, T).to(self.device)
         return betas
 
 
@@ -67,7 +69,7 @@ class Diffusion:
         c = self.coeffs
 
         for t in range(self.T):
-            noise = torch.randn_like(x_t)
+            noise = torch.randn_like(x_t).to(self.device)
             x_t = c['sqrt_one_minus_b'][t] * x_t + c['sqrt_b'][t] * noise   # sample from q(x_t|x_t-1)
             images.append(x_t)
         
@@ -89,7 +91,7 @@ class Diffusion:
         t = t.view(t.shape[0], 1, 1, 1)
 
         c = self.coeffs
-        noise = torch.randn_like(x_0)
+        noise = torch.randn_like(x_0).to(self.device)
 
         x_t = c["sqrt_a_bar"][t] * x_0 + c["sqrt_one_minus_a_bar"][t] * noise   # sample from q(x_t | x_0)
 
@@ -118,7 +120,7 @@ class Diffusion:
             sigma_t = 0
         
         u_t = c['image_coeff'][t] * (x_t - c['noise_coeff'][t] * e_t)
-        new_x = u_t + sigma_t * torch.randn_like(x_t)   # sample from p_theta(x_t-1 | x_t)
+        new_x = u_t + sigma_t * torch.randn_like(x_t).to(self.device)   # sample from p_theta(x_t-1 | x_t)
 
         return new_x
 
@@ -129,13 +131,13 @@ class Diffusion:
         """
 
         x_noisy, noise = self.sample_forward_process(x_0, t)
-        noise_pred = self.model(x_noisy, t)
+        noise_pred = self.model(x_noisy, t).sample  # .sample, because we use diffusers unet
         loss = F.mse_loss(noise, noise_pred)
 
         return loss
 
 
-    def train(self, dataloader: DataLoader, lr: float, epochs: int, patience: int = 10, lr_patience: int = 5, factor: float = 0.5) -> None:
+    def train(self, dataloader: DataLoader, lr: float, epochs: int, patience: int = 10, lr_patience: int = 5, factor: float = 0.5, model_path=None) -> None:
         """
         Train UNet model.
 
@@ -148,6 +150,8 @@ class Diffusion:
             factor: Factor to multiply LR when loss plateaus (e.g., 0.5 reduces LR by half).
         """
 
+        model_path = model_path if model_path else self.model_path
+
         self.model.train()
 
         optimizer = optim.Adam(self.model.parameters(), lr=lr)
@@ -159,8 +163,9 @@ class Diffusion:
         for epoch in range(epochs):
             epoch_loss = 0
             for (x, _) in dataloader:
+                x = x.to(self.device)
                 optimizer.zero_grad()
-                t = torch.randint(low=0, high=self.T, size=(x.shape[0],))
+                t = torch.randint(low=0, high=self.T, size=(x.shape[0],)).to(self.device)
                 loss = self.get_loss(x, t)
                 loss.backward()
                 optimizer.step()
@@ -177,7 +182,7 @@ class Diffusion:
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 no_improve_count = 0
-                torch.save(self.model.state_dict(), self.model_path)
+                torch.save(self.model.state_dict(), model_path)
                 print("New min loss. Model saved.")
             else:
                 no_improve_count += 1
@@ -190,21 +195,24 @@ class Diffusion:
 
     
     @torch.no_grad()
-    def infer(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32)) -> list[torch.Tensor]:
+    def infer(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), model_path=None) -> list[torch.Tensor]:
         """
         Generate image from noise
         (Algorithm 2 in DDPM paper)
         """
 
-        self.model.load_state_dict(torch.load(self.model_path))
+        model_path = model_path if model_path else self.model_path
+
+        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
+        self.model = self.model.to(self.device)
         self.model.eval()
 
-        x_t = torch.randn((batch_size, image_shape[0], image_shape[1], image_shape[2]))
+        x_t = torch.randn((batch_size, image_shape[0], image_shape[1], image_shape[2])).to(self.device)
         images = [x_t]
 
         for t in range(0, T)[::-1]:
-            t = torch.full((1,), t, device=self.device)
-            e_t = self.model(x_t, t)  # Predicted noise
+            t = torch.full((1,), t).to(self.device)
+            e_t = self.model(x_t, t).sample  # Predicted noise; .sample, because we use diffusers unet
             x_t = self.sample_reverse_process(x_t, t, e_t)
             images.append(x_t)
         

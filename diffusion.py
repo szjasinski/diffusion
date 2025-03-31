@@ -8,22 +8,18 @@ from torch.utils.data.dataloader import DataLoader
 # from diffusion_unet import UNet
 from diffusers import UNet2DModel
 
+from noise_adder import Scheduler
+
 
 class Diffusion:
 
-    def __init__(self, T: int = 1000, noise_scheduler: str = "linear"):
+    def __init__(self, scheduler: Scheduler):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        betas_dict = {"linear": self._get_linear_betas,
-                      # Add cosine and others
-                      }
-        if noise_scheduler not in betas_dict:
-            raise ValueError(f"Unsupported noise scheduler: {noise_scheduler}")
-
-        betas = betas_dict[noise_scheduler](T=T)
+        betas = scheduler.betas
 
         self.coeffs = self._create_coeffs_from_betas(betas)
-        self.T = T
+        self.T = scheduler.T
 
         self.model_path = "model_checkpoint.pth"
 

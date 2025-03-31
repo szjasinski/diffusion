@@ -1,8 +1,3 @@
-# Bazuje na "U-Net: Convolutional Networks for Biomedical Image Segmentation"
-# implementacja: https://github.com/uygarkurt/UNet-PyTorch
-# Niektóre nazwy zmienione dla przejrzystości
-
-
 import torch
 import torch.nn as nn
 

@@ -16,6 +16,8 @@ class Diffusion:
     def __init__(self, scheduler: Scheduler):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        self.scheduler = scheduler
+
         betas = scheduler.betas
 
         self.coeffs = self._create_coeffs_from_betas(betas)
@@ -191,8 +193,9 @@ class Diffusion:
 
     
     @torch.no_grad()
-    def infer(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), model_path=None) -> list[torch.Tensor]:
+    def get_backward_process_list(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), model_path=None) -> list[torch.Tensor]:
         """
+        Returns list of denoising process. Each element is a batch of images at timestep t
         Generate image from noise
         (Algorithm 2 in DDPM paper)
         """
@@ -213,3 +216,23 @@ class Diffusion:
             images.append(x_t)
         
         return images
+
+    def sample_images(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), model_path=None) -> torch.Tensor:
+        """
+        Returns batch of images after denoising process
+        """
+
+        model_path = model_path if model_path else self.model_path
+
+        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
+        self.model = self.model.to(self.device)
+        self.model.eval()
+
+        x_t = torch.randn((batch_size, image_shape[0], image_shape[1], image_shape[2])).to(self.device)
+
+        for t in range(0, T)[::-1]:
+            t = torch.full((1,), t).to(self.device)
+            e_t = self.model(x_t, t).sample  # Predicted noise; .sample, because we use diffusers unet
+            x_t = self.sample_reverse_process(x_t, t, e_t)
+        
+        return x_t

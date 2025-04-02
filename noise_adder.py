@@ -122,3 +122,18 @@ class SigmoidScheduler(Scheduler):
         b = self.params.get('b', self.T / 2) 
         t = torch.tensor(t, dtype=torch.float32).to(self.device)
         return 1 - (1 / (1 + torch.exp(-k * ((t / self.T) - (b / self.T)))))
+    
+
+class LogarithmicScheduler2(Scheduler):
+    def get_beta(self, t):
+        s = self.params.get('s', 0.01)  # Smoothing factor
+        t = torch.tensor(t, dtype=torch.float32).to(self.device)
+        T_t = torch.tensor(self.T, dtype=torch.float32).to(self.device)
+        return 1 - (torch.log(1 + s * (self.T-t)) / torch.log(1 + s * T_t))
+
+
+class PolynomialScheduler2(Scheduler):
+    def get_beta(self, t):
+        power = self.params.get('power', 2)
+        t = torch.tensor(t, dtype=torch.float32).to(self.device)
+        return 1 - ((self.T-t) / self.T) ** power

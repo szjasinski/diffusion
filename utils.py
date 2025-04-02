@@ -43,10 +43,11 @@ def load_transformed_CIFAR10(batch_size: int,
     return dataset, dataloader
 
 
-def visualize_images(images: Sequence[torch.Tensor], 
+def visualize_process(images: Sequence[torch.Tensor], 
                      n_rows: int, 
                      n_cols: int,
-                     save_result: bool = False) -> None:
+                     save_result: bool = False,
+                     filename: str = "") -> None:
     """
     Visualizes images at different levels of noise in a grid.
 
@@ -77,9 +78,44 @@ def visualize_images(images: Sequence[torch.Tensor],
     if save_result:
         save_dir = "visualizations"
         os.makedirs(save_dir, exist_ok=True)
-        filename = f"{save_dir}/{datetime.now()}.png"
+        filename = f"{save_dir}/process-{filename}-{datetime.now()}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"Image saved: {filename}")
 
+    plt.show()
+
+
+def visualize_grid(x_batch: torch.Tensor, 
+                   save_result: bool = False,
+                   filename: str = "") -> None:
+    
+    batch_size = x_batch.size()[0]
+    side_size = batch_size**(1/2)
+    assert side_size.is_integer(), "batch size should be a squared integer"
+    side_size = int(side_size)
+
+    fig, axes = plt.subplots(side_size, side_size, figsize=(side_size, side_size))
+    axes = axes if side_size > 1 else [axes]   # Ensure axes is 2D
+
+    for i in range(batch_size):
+        col = i // side_size
+        row = i % side_size
+
+        img = x_batch[i].permute(1, 2, 0).cpu().numpy()
+        img = img * 0.5 + 0.5  # Denormalize
+        img = img.clip(0, 1)
+        
+        axes[row][col].imshow(img)
+        axes[row][col].axis("off")
+    
+    plt.tight_layout()
+
+    if save_result:
+        save_dir = "visualizations"
+        os.makedirs(save_dir, exist_ok=True)
+        filename = f"{save_dir}/grid-{filename}-{datetime.now()}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Image saved: {filename}")
+    
     plt.show()
 

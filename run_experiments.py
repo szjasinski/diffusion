@@ -1,7 +1,7 @@
 import torch
 
 from diffusion import Diffusion
-from noise_adder import LinearScheduler, CosineScheduler
+from schedulers import LinearScheduler, CosineScheduler
 from noise_distributions import normal_noise_like, uniform_noise_like, salt_pepper_noise_like
 
 from utils import load_transformed_CIFAR10

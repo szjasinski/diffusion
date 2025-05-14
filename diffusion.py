@@ -8,7 +8,7 @@ from torch.utils.data.dataloader import DataLoader
 # from diffusion_unet import UNet
 from diffusers import UNet2DModel
 
-from noise_adder import Scheduler
+from schedulers import Scheduler
 
 from typing import Callable
 

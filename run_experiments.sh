@@ -8,4 +8,4 @@
 
 cd $HOME/diffusion
 source activate diffusion_density
-python -u train_diffusion_linear.py
+python -u run_experiments.py

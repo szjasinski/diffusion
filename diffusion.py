@@ -10,13 +10,16 @@ from diffusers import UNet2DModel
 
 from noise_adder import Scheduler
 
+from typing import Callable
+
 
 class Diffusion:
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler, noise_like: Callable):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.scheduler = scheduler
+        self.noise_like = noise_like
 
         betas = scheduler.betas
 
@@ -67,7 +70,7 @@ class Diffusion:
         c = self.coeffs
 
         for t in range(self.T):
-            noise = torch.randn_like(x_t).to(self.device)
+            noise = self.noise_like(x_t).to(self.device)
             x_t = c['sqrt_one_minus_b'][t] * x_t + c['sqrt_b'][t] * noise   # sample from q(x_t|x_t-1)
             images.append(x_t)
         
@@ -89,7 +92,7 @@ class Diffusion:
         t = t.view(t.shape[0], 1, 1, 1)
 
         c = self.coeffs
-        noise = torch.randn_like(x_0).to(self.device)
+        noise = self.noise_like(x_0).to(self.device)
 
         x_t = c["sqrt_a_bar"][t] * x_0 + c["sqrt_one_minus_a_bar"][t] * noise   # sample from q(x_t | x_0)
 
@@ -118,7 +121,7 @@ class Diffusion:
             sigma_t = 0
         
         u_t = c['image_coeff'][t] * (x_t - c['noise_coeff'][t] * e_t)
-        new_x = u_t + sigma_t * torch.randn_like(x_t).to(self.device)   # sample from p_theta(x_t-1 | x_t)
+        new_x = u_t + sigma_t * self.noise_like(x_t).to(self.device)   # sample from p_theta(x_t-1 | x_t)
 
         return new_x
 
@@ -146,6 +149,7 @@ class Diffusion:
             patience: Number of epochs to wait for loss improvement before stopping.
             lr_patience: Number of epochs without improvement before reducing LR.
             factor: Factor to multiply LR when loss plateaus (e.g., 0.5 reduces LR by half).
+            model_path: Name of checkpoint to which the modell will be saved
         """
 
         model_path = model_path if model_path else self.model_path
@@ -206,7 +210,8 @@ class Diffusion:
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        x_t = torch.randn((batch_size, image_shape[0], image_shape[1], image_shape[2])).to(self.device)
+        tensor = torch.zeros((batch_size, image_shape[0], image_shape[1], image_shape[2]))
+        x_t = self.noise_like(tensor).to(self.device)
         images = [x_t]
 
         for t in range(0, T)[::-1]:
@@ -228,7 +233,8 @@ class Diffusion:
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        x_t = torch.randn((batch_size, image_shape[0], image_shape[1], image_shape[2])).to(self.device)
+        tensor = torch.zeros((batch_size, image_shape[0], image_shape[1], image_shape[2]))
+        x_t = self.noise_like(tensor).to(self.device)
 
         for t in range(0, T)[::-1]:
             t = torch.full((1,), t).to(self.device)
@@ -236,3 +242,4 @@ class Diffusion:
             x_t = self.sample_reverse_process(x_t, t, e_t)
         
         return x_t
+    

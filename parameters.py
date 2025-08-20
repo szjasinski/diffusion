@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Callable
 from dataclasses import dataclass, field
 
@@ -31,11 +32,14 @@ class RunConfig:
     scheduler: Scheduler
     scheduler_T: int = 1000
     seed: int = 42
+    output_folder: str = "outputs"
+    experiment_path: str = field(init=False)
+    checkpoint_path: str = field(init=False)
     run_name: str = field(init=False)
-    checkpoint_name: str = field(init=False)
 
     def __post_init__(self):
         scheduler_type = self.scheduler.__name__.replace("Scheduler", "").lower()
         noise_type = self.noise_func.__name__.replace("_noise_like", "")
         self.run_name =  scheduler_type + "_" + noise_type
-        self.checkpoint_name = "checkpoint_" + self.run_name
+        self.experiment_path = Path(self.output_folder, self.run_name)
+        self.checkpoint_path = Path(self.experiment_path, "checkpoint_" + self.run_name)

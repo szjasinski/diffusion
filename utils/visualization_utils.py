@@ -1,6 +1,7 @@
 import os
-from datetime import datetime
+import time
 from typing import Sequence
+from pathlib import Path
 
 import torch
 import matplotlib.pyplot as plt
@@ -9,8 +10,9 @@ import matplotlib.pyplot as plt
 def visualize_process(images: Sequence[torch.Tensor], 
                      n_rows: int, 
                      n_cols: int,
-                     save_result: bool = False,
-                     filename: str = "") -> None:
+                     save_result: bool,
+                     experiment_path: str,
+                     result_identifier: str) -> None:
     """
     Visualizes images at different levels of noise in a grid.
 
@@ -39,18 +41,19 @@ def visualize_process(images: Sequence[torch.Tensor],
     plt.tight_layout()
 
     if save_result:
-        save_dir = "visualizations"
-        os.makedirs(save_dir, exist_ok=True)
-        filename = f"{save_dir}/process-{filename}-{datetime.now()}.png"
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
-        print(f"Image saved: {filename}")
+        os.makedirs(experiment_path, exist_ok=True)
+        timestamp = time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
+        save_path = Path(experiment_path, f"process-{result_identifier}-{timestamp}.png")
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Image saved: {save_path}")
 
     plt.show()
 
 
 def visualize_grid(x_batch: torch.Tensor, 
-                   save_result: bool = False,
-                   filename: str = "") -> None:
+                   save_result: bool,
+                   experiment_path: str,
+                   result_identifier: str) -> None:
     
     batch_size = x_batch.size()[0]
     side_size = batch_size**(1/2)
@@ -74,11 +77,11 @@ def visualize_grid(x_batch: torch.Tensor,
     plt.tight_layout()
 
     if save_result:
-        save_dir = "visualizations"
-        os.makedirs(save_dir, exist_ok=True)
-        filename = f"{save_dir}/grid-{filename}-{datetime.now()}.png"
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
-        print(f"Image saved: {filename}")
+        os.makedirs(experiment_path, exist_ok=True)
+        timestamp = time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
+        save_path = f"{experiment_path}/grid-{result_identifier}-{timestamp}.png"
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Image saved: {save_path}")
     
     plt.show()
 

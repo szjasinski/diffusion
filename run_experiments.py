@@ -7,9 +7,9 @@ from parameters import TrainingParams, VisualizationParams, RunConfig
 from schedulers import LinearScheduler, CosineScheduler
 from noise_distributions import normal_noise_like, uniform_noise_like, salt_pepper_noise_like
 from utils.experiment_utils import (load_transformed_CIFAR10,
-                              train_model,
-                              create_visualizations,)
-
+                                    train_model,
+                                    create_visualizations,
+                                    log_config,)
 
 
 train_params = TrainingParams()
@@ -23,7 +23,8 @@ runs = {
 }
 
 # Select indexes and order of configs to run
-indexes = [2, 1, 0]
+# indexes = [1, 2, 0, 3]
+indexes = runs.keys()
 
 
 if __name__ == "__main__":
@@ -37,6 +38,7 @@ if __name__ == "__main__":
     for i in indexes:
         run_config = runs[i]
         try:
+            log_config(run_config)
             train_model(run_config, dataloader)
             create_visualizations(run_config)
         except Exception as e:

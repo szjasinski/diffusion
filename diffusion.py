@@ -1,5 +1,9 @@
+from typing import Callable
+from pathlib import Path
+import csv
+import time
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -10,8 +14,6 @@ from diffusers import UNet2DModel
 
 from schedulers import Scheduler
 
-from typing import Callable
-
 
 class Diffusion:
 
@@ -21,12 +23,8 @@ class Diffusion:
         self.scheduler = scheduler
         self.noise_like = noise_like
 
-        betas = scheduler.betas
-
-        self.coeffs = self._create_coeffs_from_betas(betas)
+        self.coeffs = self._create_coeffs_from_betas(scheduler.betas)
         self.T = scheduler.T
-
-        self.model_path = "model_checkpoint.pth"
 
         self.model = UNet2DModel().to(self.device)
 
@@ -110,7 +108,7 @@ class Diffusion:
         t: timestep
         e_t: predicted noise, shape: (batch_size, C, H, W)
         """
-        assert 0 <= t <= self.T
+        assert 0 <= t < self.T
         assert x_t.shape == e_t.shape
 
         c = self.coeffs
@@ -138,7 +136,8 @@ class Diffusion:
         return loss
 
 
-    def train(self, dataloader: DataLoader, lr: float, epochs: int, patience: int = 10, lr_patience: int = 5, factor: float = 0.5, model_path=None) -> None:
+    def train(self, dataloader: DataLoader, lr: float, epochs: int, patience: int = 10, lr_patience: int = 5, factor: float = 0.5, 
+              experiment_path: Path = None, checkpoint_path: Path = None) -> None:
         """
         Train UNet model.
 
@@ -152,7 +151,14 @@ class Diffusion:
             model_path: Name of checkpoint to which the modell will be saved
         """
 
-        model_path = model_path if model_path else self.model_path
+        def log_epoch(experiment_path: Path, log_row: dict):
+            timestamp = time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
+            path = Path(experiment_path, f"training_logs-{timestamp}.csv")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", newline="") as f:
+                writer = csv.writer(f)
+                if epoch == 0:  writer.writerow(log_row.keys())
+                writer.writerow(log_row.values())
 
         self.model.train()
 
@@ -184,10 +190,18 @@ class Diffusion:
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 no_improve_count = 0
-                torch.save(self.model.state_dict(), model_path)
+                torch.save(self.model.state_dict(), checkpoint_path)
                 print("New min loss. Model saved.")
             else:
                 no_improve_count += 1
+            
+            #Log epoch info to file
+            log_row = {"epoch": epoch,
+                        "avg_loss": avg_loss,
+                        "best_loss": best_loss,
+                        "current_lr": current_lr,
+                        "no_improve_count": no_improve_count}
+            log_epoch(experiment_path=experiment_path, log_row=log_row)
             
             # Early stopping check
             if no_improve_count >= patience:
@@ -197,16 +211,14 @@ class Diffusion:
 
     
     @torch.no_grad()
-    def get_backward_process_list(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), model_path=None) -> list[torch.Tensor]:
+    def get_backward_process_list(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), checkpoint_path=None) -> list[torch.Tensor]:
         """
         Returns list of denoising process. Each element is a batch of images at timestep t
         Generate image from noise
         (Algorithm 2 in DDPM paper)
         """
 
-        model_path = model_path if model_path else self.model_path
-
-        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
+        self.model.load_state_dict(torch.load(checkpoint_path, weights_only=True, map_location=self.device))
         self.model = self.model.to(self.device)
         self.model.eval()
 
@@ -222,14 +234,12 @@ class Diffusion:
         
         return images
 
-    def sample_images(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), model_path=None) -> torch.Tensor:
+    def sample_images(self, T: int, batch_size=1, image_shape: tuple = (3, 32, 32), checkpoint_path=None) -> torch.Tensor:
         """
         Returns batch of images after denoising process
         """
 
-        model_path = model_path if model_path else self.model_path
-
-        self.model.load_state_dict(torch.load(model_path, weights_only=True, map_location=self.device))
+        self.model.load_state_dict(torch.load(checkpoint_path, weights_only=True, map_location=self.device))
         self.model = self.model.to(self.device)
         self.model.eval()
 

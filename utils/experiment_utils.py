@@ -1,5 +1,9 @@
 from datetime import datetime
+import time
 from typing import Tuple
+import json
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
 
 import torch
 import torchvision
@@ -61,7 +65,8 @@ def train_model(run_config: RunConfig, dataloader: DataLoader):
                    patience=run_config.training_params.patience,
                    lr_patience=run_config.training_params.lr_patience,
                    factor=run_config.training_params.factor,
-                   model_path=run_config.checkpoint_name
+                   experiment_path=run_config.experiment_path,
+                   checkpoint_path=run_config.checkpoint_path
                    )
     
     print(f"{datetime.now()} Training finished for {run_config.run_name}.")
@@ -76,20 +81,45 @@ def create_visualizations(run_config: RunConfig):
     backward_process_list = diffuser.get_backward_process_list(T=run_config.scheduler_T, 
                                                                batch_size=run_config.visualization_params.denoising_samples_num, 
                                                                image_shape=run_config.visualization_params.image_shape, 
-                                                               model_path=run_config.checkpoint_name)
+                                                               checkpoint_path=run_config.checkpoint_path)
     visualize_process(backward_process_list, 
                       run_config.visualization_params.n_rows, 
                       run_config.visualization_params.n_cols, 
-                      save_result=True, 
-                      filename=run_config.run_name)
+                      save_result=True,
+                      experiment_path=run_config.experiment_path,
+                      result_identifier=run_config.run_name)
 
     print(f"{datetime.now()} Visualizing grid of images...")
     images_batch = diffuser.sample_images(T=run_config.scheduler_T, 
                                           batch_size=run_config.visualization_params.grid_side_size ** 2, 
-                                          model_path=run_config.checkpoint_name)
+                                          checkpoint_path=run_config.checkpoint_path)
     visualize_grid(images_batch, 
                    save_result=True, 
-                   filename=run_config.run_name)
+                   experiment_path=run_config.experiment_path,
+                   result_identifier=run_config.run_name)
     
     print(f"{datetime.now()} Finished creating visualization for {run_config.run_name}.")
+
+
+def log_config(run_config):
+    def serialize(obj):
+        """Custom JSON serializer for unsupported types."""
+        if is_dataclass(obj):
+            return {k: serialize(v) for k, v in asdict(obj).items()}
+        if isinstance(obj, Path):
+            return str(obj)
+        if callable(obj):  # functions, classes
+            return obj.__name__
+        if isinstance(obj, type):  # classes like LinearScheduler
+            return f"{obj.__module__}.{obj.__name__}"
+        if isinstance(obj, (tuple, set)):
+            return list(obj)
+        return obj
     
+    timestamp = time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
+    save_path = Path(run_config.experiment_path, f"config-{run_config.run_name}-{timestamp}.json")
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(save_path, "w") as f:
+        json.dump(serialize(run_config), f, indent=4)
+        print("Config json saved...")

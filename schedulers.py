@@ -64,7 +64,8 @@ class CosineScheduler(Scheduler):
         ], dtype=torch.float32).to(self.device)
 
         alphas_bar = cos_values / cos_values[0]
-        self.betas = 1 - (alphas_bar[1:] / alphas_bar[:-1])
+        self._betas= 1 - (alphas_bar[1:] / alphas_bar[:-1])
+        self.betas = torch.clamp(self._betas, max=0.999)    # as per IDDPM paper
         self.alphas = 1 - self.betas
         self.alphas_bar = alphas_bar[1:]
 

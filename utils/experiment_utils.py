@@ -72,10 +72,6 @@ def create_visualizations(run_config: RunConfig):
     diffuser = Diffusion(run_config.scheduler(run_config.scheduler_T),
                          run_config.noise_func)
 
-    # hack
-    if diffuser.scheduler.__class__.__name__ == "CosineScheduler":
-        diffuser.coeffs['image_coeff'][-1] = 1.9999 # change inf value to number. happens because we start with betas in diffusion with cosine scheduler and not with alphas
-
     print(f"{datetime.now()} Visualizing denoising process...")
     backward_process_list = diffuser.get_backward_process_list(T=run_config.scheduler_T, 
                                                                batch_size=run_config.visualization_params.denoising_samples_num, 
@@ -96,3 +92,4 @@ def create_visualizations(run_config: RunConfig):
                    filename=run_config.run_name)
     
     print(f"{datetime.now()} Finished creating visualization for {run_config.run_name}.")
+    

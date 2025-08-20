@@ -1,67 +1,45 @@
+from datetime import datetime
+import traceback
+
 import torch
 
-from diffusion import Diffusion
+from parameters import TrainingParams, VisualizationParams, RunConfig
 from schedulers import LinearScheduler, CosineScheduler
 from noise_distributions import normal_noise_like, uniform_noise_like, salt_pepper_noise_like
-
-from utils import load_transformed_CIFAR10
-from utils import visualize_process, visualize_grid
-
-from datetime import datetime
+from utils.experiment_utils import (load_transformed_CIFAR10,
+                              train_model,
+                              create_visualizations,)
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Training params
-batch_size = 50
-epochs = 120    # 1 for testing
-lr = 0.0001
-T = 1000
-#########
+train_params = TrainingParams()
+vis_params = VisualizationParams()
+ 
+runs = {
+    0: RunConfig(train_params, vis_params, normal_noise_like, LinearScheduler),
+    1: RunConfig(train_params, vis_params, normal_noise_like, CosineScheduler),
+    2: RunConfig(train_params, vis_params, uniform_noise_like, CosineScheduler),
+    3: RunConfig(train_params, vis_params, salt_pepper_noise_like, CosineScheduler),
+}
 
-
-# Visualization params
-image_shape = (3, 32, 32)
-denoising_samples_num = 15  # 2 for testing
-n_rows = denoising_samples_num
-n_cols = 25
-grid_side_size = 6  # 2 for testing
-#########
-
-data, dataloader = load_transformed_CIFAR10(batch_size=batch_size)
-
-runs = {"names": ["cos_normal", "cos_uniform", "cos_salt_pepper"],
-        "checkpoints": ["checkpoint_cos_normal", "checkpoint_cos_uniform", "checkpoint_cos_salt_pepper"],   # will be created
-        "schedulers": [CosineScheduler(T=T), CosineScheduler(T=T), CosineScheduler(T=T)],
-        "noises": [normal_noise_like, uniform_noise_like, salt_pepper_noise_like]}
+# Select indexes and order of configs to run
+indexes = [2, 1, 0]
 
 
-# TRAIN AND VISUALIZE LOOP
-indexes = [2, 1, 0] # Choose order
-for i in indexes:
-    file_prefix = runs["names"][i]
-    checkpoint = runs['names'][i]
-    scheduler = runs["schedulers"][i]
-    noise_distribution = runs["noises"][i]
-    print("RUN", i)
-    print(file_prefix)
-    print(datetime.now())
+if __name__ == "__main__":
+    seed = RunConfig.seed
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-    diffuser = Diffusion(scheduler, noise_distribution)
+    print(f"{datetime.now()} Loading dataset...")
+    data, dataloader = load_transformed_CIFAR10(batch_size=TrainingParams.batch_size, seed=seed)
 
-    print("Training...")
-    diffuser.train(dataloader, epochs=epochs, lr=lr, model_path=checkpoint) # Comment if only inference is needed
-    print(datetime.now())
-    
-
-    # VISUALIZATIONS
-    if diffuser.scheduler.__class__.__name__ == "CosineScheduler":
-        diffuser.coeffs['image_coeff'][-1] = 1.9999 # change inf value to number. happens because we start with betas in diffusion with cosine scheduler and not with alphas
-
-    print("Denoising visualization...")
-    backward_process_list = diffuser.get_backward_process_list(T=T, batch_size=denoising_samples_num, image_shape=image_shape, model_path=checkpoint)
-    visualize_process(backward_process_list, n_rows, n_cols, save_result=True, filename=file_prefix)
-
-    print("Grid visualization...")
-    images_batch = diffuser.sample_images(T=T, batch_size=grid_side_size**2, model_path=checkpoint)
-    visualize_grid(images_batch, save_result=True, filename=file_prefix)
+    for i in indexes:
+        run_config = runs[i]
+        try:
+            train_model(run_config, dataloader)
+            create_visualizations(run_config)
+        except Exception as e:
+            print(f"{datetime.now()} Run {run_config.run_name} failed.")
+            print("\n** ERROR **", e)
+            traceback.print_exc()

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Callable
 from dataclasses import dataclass, field
 
-from schedulers import  Scheduler
+from utils.schedulers import  Scheduler
 
 
 @dataclass

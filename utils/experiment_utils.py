@@ -10,8 +10,8 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Dataset
 
-from diffusion import Diffusion
-from parameters import RunConfig
+from utils.diffusion import Diffusion
+from utils.parameters import RunConfig
 from utils.visualization_utils import visualize_process, visualize_grid
 
 

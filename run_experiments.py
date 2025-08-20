@@ -3,9 +3,9 @@ import traceback
 
 import torch
 
-from parameters import TrainingParams, VisualizationParams, RunConfig
-from schedulers import LinearScheduler, CosineScheduler
-from noise_distributions import normal_noise_like, uniform_noise_like, salt_pepper_noise_like
+from utils.parameters import TrainingParams, VisualizationParams, RunConfig
+from utils.schedulers import LinearScheduler, CosineScheduler
+from utils.noise_distributions import normal_noise_like, uniform_noise_like, salt_pepper_noise_like
 from utils.experiment_utils import (load_transformed_CIFAR10,
                                     train_model,
                                     create_visualizations,

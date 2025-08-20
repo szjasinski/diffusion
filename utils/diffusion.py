@@ -12,7 +12,7 @@ from torch.utils.data.dataloader import DataLoader
 # from diffusion_unet import UNet
 from diffusers import UNet2DModel
 
-from schedulers import Scheduler
+from utils.schedulers import Scheduler
 
 
 class Diffusion:

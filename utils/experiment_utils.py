@@ -4,6 +4,7 @@ from typing import Tuple
 import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
+import argparse
 
 import torch
 import torchvision
@@ -13,6 +14,17 @@ from torch.utils.data import DataLoader, Dataset
 from utils.diffusion import Diffusion
 from utils.parameters import RunConfig
 from utils.visualization_utils import visualize_process, visualize_grid
+
+
+def get_timestamp():
+    return time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
+
+
+def get_parse_args():
+    parser = argparse.ArgumentParser(description="Args parser")
+    parser.add_argument("--run_indexes", nargs="+", type=int, required=True, help="List of run indexes")
+    args = parser.parse_args()
+    return args
 
 
 def load_transformed_CIFAR10(batch_size: int,
@@ -52,13 +64,13 @@ def load_transformed_CIFAR10(batch_size: int,
 
 
 def train_model(run_config: RunConfig, dataloader: DataLoader):
-    print(f"{datetime.now()} Running experiment {run_config.run_name}...")
+    print(f"{get_timestamp()} Running experiment {run_config.run_name}...")
 
     diffuser = Diffusion(run_config.scheduler(run_config.scheduler_T),
                          run_config.noise_func,
                          run_config.unet_cls)
     
-    print(f"{datetime.now()} Starting training...")
+    print(f"{get_timestamp()} Starting training...")
 
     diffuser.train(dataloader,
                    lr=run_config.training_params.lr,
@@ -70,7 +82,7 @@ def train_model(run_config: RunConfig, dataloader: DataLoader):
                    checkpoint_path=run_config.checkpoint_path
                    )
     
-    print(f"{datetime.now()} Training finished for {run_config.run_name}.")
+    print(f"{get_timestamp()} Training finished for {run_config.run_name}.")
 
 
 def create_visualizations(run_config: RunConfig):
@@ -79,7 +91,7 @@ def create_visualizations(run_config: RunConfig):
                          run_config.noise_func,
                          run_config.unet_cls)
 
-    print(f"{datetime.now()} Visualizing denoising process...")
+    print(f"{get_timestamp()} Visualizing denoising process...")
     backward_process_list = diffuser.get_backward_process_list(T=run_config.scheduler_T, 
                                                                batch_size=run_config.visualization_params.denoising_samples_num, 
                                                                image_shape=run_config.visualization_params.image_shape, 
@@ -91,7 +103,7 @@ def create_visualizations(run_config: RunConfig):
                       experiment_path=run_config.experiment_path,
                       result_identifier=run_config.run_name)
 
-    print(f"{datetime.now()} Visualizing grid of images...")
+    print(f"{get_timestamp()} Visualizing grid of images...")
     images_batch = diffuser.sample_images(T=run_config.scheduler_T, 
                                           batch_size=run_config.visualization_params.grid_side_size ** 2, 
                                           checkpoint_path=run_config.checkpoint_path)
@@ -100,7 +112,7 @@ def create_visualizations(run_config: RunConfig):
                    experiment_path=run_config.experiment_path,
                    result_identifier=run_config.run_name)
     
-    print(f"{datetime.now()} Finished creating visualization for {run_config.run_name}.")
+    print(f"{get_timestamp()} Finished creating visualization for {run_config.run_name}.")
 
 
 def log_config(run_config):
@@ -118,10 +130,9 @@ def log_config(run_config):
             return list(obj)
         return obj
     
-    timestamp = time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
-    save_path = Path(run_config.experiment_path, f"config-{run_config.run_name}-{timestamp}.json")
+    save_path = Path(run_config.experiment_path, f"config-{run_config.run_name}-{get_timestamp()}.json")
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(save_path, "w") as f:
         json.dump(serialize(run_config), f, indent=4)
-        print("Config json saved...")
+        print("Config json saved.")

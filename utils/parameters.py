@@ -13,7 +13,7 @@ from utils.schedulers import  Scheduler
 class TrainingParams:
     batch_size: int = 50
     lr: float = 0.0001
-    epochs: int = 120    # 1 for testing
+    epochs: int = 200    # 1 for testing
     patience: int = 10
     lr_patience: int = 5
     factor: float = 0.5

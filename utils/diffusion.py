@@ -19,7 +19,8 @@ from utils.schedulers import Scheduler
 
 class Diffusion:
 
-    def __init__(self, scheduler: Scheduler, noise_like: Callable, unet_cls: UNetNoTimesteps | UNetTimesteps | UNetDiffusers):
+    def __init__(self, scheduler: Scheduler, noise_like: Callable[[torch.Tensor], torch.Tensor], 
+                 unet_cls: UNetNoTimesteps | UNetTimesteps | UNetDiffusers):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.scheduler = scheduler
@@ -129,14 +130,9 @@ class Diffusion:
         new_x = u_t + sigma_t * self.noise_like(x_t).to(self.device)   # sample from p_theta(x_t-1 | x_t)
 
         return new_x
+    
 
-
-    def get_loss(self, x_0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        Perform forward process, predict noise, get MSE
-        """
-
-        x_t, noise = self.sample_forward_process(x_0, t)
+    def predict_noise(self, x_t, t):
         if isinstance(self.model, UNetDiffusers):
             noise_pred = self.model(x_t, t).sample
         elif isinstance(self.model, UNetTimesteps):
@@ -145,6 +141,16 @@ class Diffusion:
             noise_pred = self.model(x_t)
         else:
             raise TypeError("Wrong unet type.")
+        return noise_pred
+
+
+    def get_loss(self, x_0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """
+        Perform forward process, predict noise, get MSE
+        """
+
+        x_t, noise = self.sample_forward_process(x_0, t)
+        noise_pred = self.predict_noise(x_t, t)
         loss = F.mse_loss(noise, noise_pred)
 
         return loss
@@ -166,8 +172,7 @@ class Diffusion:
         """
 
         def log_epoch(experiment_path: Path, log_row: dict):
-            timestamp = time.strftime("%d-%m-%y-%H-%M-%S", time.localtime())
-            path = Path(experiment_path, f"training_logs-{timestamp}.csv")
+            path = Path(experiment_path, f"training_logs.csv")
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", newline="") as f:
                 writer = csv.writer(f)
@@ -214,7 +219,9 @@ class Diffusion:
                         "avg_loss": avg_loss,
                         "best_loss": best_loss,
                         "current_lr": current_lr,
-                        "no_improve_count": no_improve_count}
+                        "no_improve_count": no_improve_count,
+                        "timestamp": time.strftime("%d-%m-%y-%H-%M-%S", time.localtime()),
+                        }
             log_epoch(experiment_path=experiment_path, log_row=log_row)
             
             # Early stopping check
@@ -242,12 +249,7 @@ class Diffusion:
 
         for t in range(0, T)[::-1]:
             t = torch.full((1,), t).to(self.device)
-            if isinstance(self.model, UNetDiffusers):
-                e_t = self.model(x_t, t).sample  # Predicted noise
-            elif isinstance(self.model, UNetTimesteps):
-                e_t = self.model(x_t, t)
-            elif isinstance(self.model, UNetNoTimesteps):
-                e_t = self.model(x_t)
+            e_t = self.predict_noise(x_t, t)
             x_t = self.sample_reverse_process(x_t, t, e_t)
             images.append(x_t)
         
@@ -267,12 +269,7 @@ class Diffusion:
 
         for t in range(0, T)[::-1]:
             t = torch.full((1,), t).to(self.device)
-            if isinstance(self.model, UNetDiffusers):
-                e_t = self.model(x_t, t).sample  # Predicted noise
-            elif isinstance(self.model, UNetTimesteps):
-                e_t = self.model(x_t, t)
-            elif isinstance(self.model, UNetNoTimesteps):
-                e_t = self.model(x_t)
+            e_t = self.predict_noise(x_t, t)
             x_t = self.sample_reverse_process(x_t, t, e_t)
         
         return x_t

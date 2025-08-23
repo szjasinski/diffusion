@@ -8,4 +8,4 @@
 
 cd $HOME/diffusion
 source activate diffusion_density
-python -u run_experiments.py
+python -u run_experiments.py --run_indexes 

@@ -4,20 +4,22 @@ import csv
 import time
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data.dataloader import DataLoader
 
-# from diffusion_unet import UNet
-from diffusers import UNet2DModel
+from utils.custom_unets.unet_no_timesteps import UNetNoTimesteps
+from utils.custom_unets.unet_timesteps import UNetTimesteps
+from diffusers import UNet2DModel as UNetDiffusers
 
 from utils.schedulers import Scheduler
 
 
 class Diffusion:
 
-    def __init__(self, scheduler: Scheduler, noise_like: Callable):
+    def __init__(self, scheduler: Scheduler, noise_like: Callable, unet_cls: UNetNoTimesteps | UNetTimesteps | UNetDiffusers):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.scheduler = scheduler
@@ -26,7 +28,12 @@ class Diffusion:
         self.coeffs = self._create_coeffs_from_betas(scheduler.betas)
         self.T = scheduler.T
 
-        self.model = UNet2DModel().to(self.device)
+        if unet_cls is UNetDiffusers or unet_cls is UNetNoTimesteps:
+            self.model = unet_cls().to(self.device)
+        elif unet_cls is UNetTimesteps:
+            self.model = unet_cls(T=self.T).to(self.device)
+        else:
+            raise TypeError("Wrong unet type.")
 
 
     def _create_coeffs_from_betas(self, betas: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -129,8 +136,15 @@ class Diffusion:
         Perform forward process, predict noise, get MSE
         """
 
-        x_noisy, noise = self.sample_forward_process(x_0, t)
-        noise_pred = self.model(x_noisy, t).sample  # .sample, because we use diffusers unet
+        x_t, noise = self.sample_forward_process(x_0, t)
+        if isinstance(self.model, UNetDiffusers):
+            noise_pred = self.model(x_t, t).sample
+        elif isinstance(self.model, UNetTimesteps):
+            noise_pred = self.model(x_t, t)
+        elif isinstance(self.model, UNetNoTimesteps):
+            noise_pred = self.model(x_t)
+        else:
+            raise TypeError("Wrong unet type.")
         loss = F.mse_loss(noise, noise_pred)
 
         return loss
@@ -228,7 +242,12 @@ class Diffusion:
 
         for t in range(0, T)[::-1]:
             t = torch.full((1,), t).to(self.device)
-            e_t = self.model(x_t, t).sample  # Predicted noise; .sample, because we use diffusers unet
+            if isinstance(self.model, UNetDiffusers):
+                e_t = self.model(x_t, t).sample  # Predicted noise
+            elif isinstance(self.model, UNetTimesteps):
+                e_t = self.model(x_t, t)
+            elif isinstance(self.model, UNetNoTimesteps):
+                e_t = self.model(x_t)
             x_t = self.sample_reverse_process(x_t, t, e_t)
             images.append(x_t)
         
@@ -248,7 +267,12 @@ class Diffusion:
 
         for t in range(0, T)[::-1]:
             t = torch.full((1,), t).to(self.device)
-            e_t = self.model(x_t, t).sample  # Predicted noise; .sample, because we use diffusers unet
+            if isinstance(self.model, UNetDiffusers):
+                e_t = self.model(x_t, t).sample  # Predicted noise
+            elif isinstance(self.model, UNetTimesteps):
+                e_t = self.model(x_t, t)
+            elif isinstance(self.model, UNetNoTimesteps):
+                e_t = self.model(x_t)
             x_t = self.sample_reverse_process(x_t, t, e_t)
         
         return x_t

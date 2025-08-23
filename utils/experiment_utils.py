@@ -55,7 +55,8 @@ def train_model(run_config: RunConfig, dataloader: DataLoader):
     print(f"{datetime.now()} Running experiment {run_config.run_name}...")
 
     diffuser = Diffusion(run_config.scheduler(run_config.scheduler_T),
-                         run_config.noise_func)
+                         run_config.noise_func,
+                         run_config.unet_cls)
     
     print(f"{datetime.now()} Starting training...")
 
@@ -75,7 +76,8 @@ def train_model(run_config: RunConfig, dataloader: DataLoader):
 def create_visualizations(run_config: RunConfig):
 
     diffuser = Diffusion(run_config.scheduler(run_config.scheduler_T),
-                         run_config.noise_func)
+                         run_config.noise_func,
+                         run_config.unet_cls)
 
     print(f"{datetime.now()} Visualizing denoising process...")
     backward_process_list = diffuser.get_backward_process_list(T=run_config.scheduler_T, 

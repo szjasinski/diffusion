@@ -2,6 +2,10 @@ from pathlib import Path
 from typing import Callable
 from dataclasses import dataclass, field
 
+from utils.custom_unets.unet_no_timesteps import UNetNoTimesteps
+from utils.custom_unets.unet_timesteps import UNetTimesteps
+from diffusers import UNet2DModel as UNetDiffusers
+
 from utils.schedulers import  Scheduler
 
 
@@ -28,6 +32,7 @@ class VisualizationParams:
 class RunConfig:
     training_params: TrainingParams
     visualization_params: VisualizationParams
+    unet_cls: UNetNoTimesteps | UNetTimesteps | UNetDiffusers
     noise_func: Callable
     scheduler: Scheduler
     scheduler_T: int = 1000
@@ -40,6 +45,7 @@ class RunConfig:
     def __post_init__(self):
         scheduler_type = self.scheduler.__name__.replace("Scheduler", "").lower()
         noise_type = self.noise_func.__name__.replace("_noise_like", "")
-        self.run_name =  scheduler_type + "_" + noise_type
+        unet_name = self.unet_cls.__name__.lower()
+        self.run_name =  scheduler_type + "_" + noise_type + "_" + unet_name
         self.experiment_path = Path(self.output_folder, self.run_name)
         self.checkpoint_path = Path(self.experiment_path, "checkpoint_" + self.run_name)

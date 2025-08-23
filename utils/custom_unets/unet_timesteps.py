@@ -75,8 +75,8 @@ class EmbedBlock(nn.Module):
         return self.block(x)
     
 
-class UNet(nn.Module):
-    def __init__(self, T, in_channels, out_channels, C=32, t_emb_dim=128):
+class UNetTimesteps(nn.Module):
+    def __init__(self, T, in_channels=3, out_channels=3, C=32, t_emb_dim=128):
         # Add sinusoidal timestep embedding, class embedding, attention, einops (instead of pooling)
         super().__init__()
         self.T = T

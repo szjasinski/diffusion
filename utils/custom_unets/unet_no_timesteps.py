@@ -42,8 +42,8 @@ class UpBlock(nn.Module):
         return self.conv(x)
     
 
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels, C=32, t_emb_dim=128):
+class UNetNoTimesteps(nn.Module):
+    def __init__(self, in_channels=3, out_channels=3, C=32):
         # Add sinusoidal timestep embedding, class embedding, attention, einops (instead of pooling)
         super().__init__()
 

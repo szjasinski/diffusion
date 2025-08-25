@@ -1,0 +1,30 @@
+{
+    "training_params": {
+        "batch_size": 50,
+        "lr": 0.0001,
+        "epochs": 200,
+        "patience": 10,
+        "lr_patience": 5,
+        "factor": 0.5
+    },
+    "visualization_params": {
+        "image_shape": [
+            3,
+            32,
+            32
+        ],
+        "denoising_samples_num": 15,
+        "n_rows": 15,
+        "n_cols": 25,
+        "grid_side_size": 6
+    },
+    "unet_cls": "UNet2DModel",
+    "noise_func": "normal_noise_like",
+    "scheduler": "LinearScheduler",
+    "scheduler_T": 1000,
+    "seed": 42,
+    "output_folder": "outputs",
+    "experiment_path": "outputs/linear_normal_unet2dmodel",
+    "checkpoint_path": "outputs/linear_normal_unet2dmodel/checkpoint_linear_normal_unet2dmodel",
+    "run_name": "linear_normal_unet2dmodel"
+}

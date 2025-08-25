@@ -30,6 +30,8 @@ runs = {
     5: RunConfig(train_params, vis_params, UNetDiffusers, normal_noise_like, CosineScheduler),
     6: RunConfig(train_params, vis_params, UNetDiffusers, uniform_noise_like, CosineScheduler),
     7: RunConfig(train_params, vis_params, UNetDiffusers, salt_pepper_noise_like, CosineScheduler),
+    8: RunConfig(train_params, vis_params, UNetDiffusers, uniform_noise_like, LinearScheduler),
+    9: RunConfig(train_params, vis_params, UNetDiffusers, salt_pepper_noise_like, LinearScheduler),
 }
 
 
